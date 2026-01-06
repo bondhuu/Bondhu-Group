@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi Ledger Pro - Decentralized Mesh</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        :root { --wa-teal: #075e54; --wa-green: #25d366; --bg-gray: #e5ddd5; --white: #ffffff; }
+        * { box-sizing: border-box; transition: 0.2s ease-in-out; }
+        body { font-family: 'Segoe UI', sans-serif; background: #d1d7db; margin: 0; overflow: hidden; }
+        .screen { display: none; height: 100vh; width: 100%; justify-content: center; align-items: center; flex-direction: column; background: #f0f2f5; }
+        .active-screen { display: flex; animation: fadeIn 0.3s forwards; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .card { background: var(--white); padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); width: 340px; text-align: center; }
+        input, select, textarea { width: 100%; padding: 12px; margin: 8px 0; border: 1.5px solid #eee; border-radius: 10px; outline: none; font-size: 14px; }
+        .btn-action { background: var(--wa-teal); color: white; border: none; width: 100%; padding: 12px; border-radius: 10px; cursor: pointer; font-weight: bold; }
+        #chat-screen { background: var(--bg-gray); flex-direction: column; align-items: stretch; position: relative; }
+        .header { background: var(--wa-teal); color: white; padding: 12px 15px; display: flex; justify-content: space-between; align-items: center; }
+        
+        /* Sidebar Fix */
+        .sidebar { position: fixed; right: -280px; top: 0; width: 280px; height: 100%; background: white; z-index: 2000; padding: 20px; transition: 0.3s ease; display: flex; flex-direction: column; border-left: 2px solid var(--wa-teal); box-shadow: -5px 0 15px rgba(0,0,0,0.1); }
+        .sidebar.open { right: 0 !important; }
+        .sidebar-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1999; }
+        
+        #chat-messages { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .bubble { background: var(--white); padding: 10px 15px; border-radius: 12px; max-width: 80%; align-self: flex-start; box-shadow: 0 1px 2px rgba(0,0,0,0.1); word-wrap: break-word; }
+        .bubble.me { background: #dcf8c6; align-self: flex-end; }
+        .u-tag { font-size: 11px; color: var(--wa-teal); font-weight: bold; display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .poll-box { margin-top: 10px; background: #f9f9f9; padding: 10px; border-radius: 8px; border: 1px solid #ddd; }
+        .poll-opt { background: white; border: 1px solid #ccc; padding: 8px; margin: 5px 0; border-radius: 5px; cursor: pointer; display: flex; justify-content: space-between; font-size: 13px; font-weight: bold; }
+        .poll-opt:hover { background: #f0f0f0; }
+        .msg-ops { font-size: 10px; margin-top: 5px; border-top: 1px solid #f0f0f0; padding-top: 5px; display: flex; justify-content: space-between; }
+        .footer { background: #f0f0f0; padding: 10px; display: flex; gap: 10px; border-top: 1px solid #ddd; }
+        .overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2100; justify-content: center; align-items: center; }
+        .secret-item { background: #fff5f5; border: 1px solid #ffcdd2; padding: 8px; margin: 5px 0; border-radius: 5px; font-size: 12px; color: #d32f2f; }
+    </style>
+</head>
+<body onbeforeunload="closeP2P()">
+
+    <div id="side-overlay" class="sidebar-overlay" onclick="toggleSidebar()"></div>
+    <div id="sidebar" class="sidebar">
+        <h3>Mesh Dashboard</h3>
+        <div style="flex: 1; overflow-y: auto;">
+            <p style="font-size:12px; color: #d32f2f; font-weight: bold;">🚨 Send Secret Report:</p>
+            <textarea id="secret-report-input" placeholder="Type report for master..."></textarea>
+            <button class="btn-action" style="background: #d32f2f;" onclick="sendSecretReportToMaster()">Send Secretly</button>
+            <hr>
+            
+            <div id="master-only-section" style="display:none;">
+                <button class="btn-action" style="background:#fbc02d; color:#000;" onclick="toggleSecretBox()">
+                    📩 Secret Inbox (<span id="secret-badge">0</span>)
+                </button>
+                <div id="secret-list-container" style="display:none; margin-top:10px;"></div>
+                <hr>
+                <p>Mesh Announcement:</p>
+                <textarea id="notice-input" placeholder="Update global notice..."></textarea>
+                <button class="btn-action" style="background:#444;" onclick="pushNotice()">Update All Nodes</button>
+                <hr>
+            </div>
+
+            <div style="margin-top:10px; padding:10px; background:#fff9c4; border-radius:10px; font-size: 12px;">
+                <b>📌 BOARD:</b>
+                <div id="notice-text">Connecting to mesh...</div>
+            </div>
+            <div id="peer-count" style="font-size: 11px; color: #666; margin-top: 10px; font-weight: bold;">Active Peers: 0</div>
+        </div>
+        <button class="btn-action" style="background:#888; margin-top: 10px;" onclick="location.reload()">Exit Session</button>
+    </div>
+
+    <div id="type-modal" class="overlay"><div class="card"><h3>Message Type</h3><button class="btn-action" onclick="openModal('expiry-modal')">Simple Text</button><button class="btn-action" style="background:#444;margin-top:10px;" onclick="openModal('poll-modal')">Create Poll</button><button class="btn-action" style="background:none;color:#888" onclick="closeModals()">Cancel</button></div></div>
+    <div id="expiry-modal" class="overlay"><div class="card"><h3>Expiration</h3><input type="date" id="exp-date"><button class="btn-action" onclick="finalizeSend('chat', false)">Set Date</button><button class="btn-action" style="margin-top:10px;background:#054c44" onclick="finalizeSend('chat', true)">Forever</button></div></div>
+    <div id="poll-modal" class="overlay"><div class="card"><h3>New Poll</h3><input type="text" id="p-q" placeholder="Question?"><input type="text" id="p-o1" placeholder="Option A"><input type="text" id="p-o2" placeholder="Option B"><button class="btn-action" onclick="finalizeSend('poll')">Launch Poll</button></div></div>
+
+    <div id="auth-screen" class="screen active-screen">
+        <div class="card"><h2>WiFi Ledger Pro</h2><input type="text" id="username" placeholder="Username"><input type="password" id="password" placeholder="Password"><input type="text" id="private-key" placeholder="Private Key"><button class="btn-action" onclick="login()">Enter Mesh</button></div>
+    </div>
+    
+    <div id="group-screen" class="screen">
+        <div class="card">
+            <h3>Territory Selection</h3>
+            <select id="group-select">
+                <option value="Global">🌎 Global Mesh</option>
+                <option value="Afghanistan">Afghanistan</option><option value="Albania">Albania</option><option value="Algeria">Algeria</option><option value="Andorra">Andorra</option><option value="Angola">Angola</option><option value="Antigua and Barbuda">Antigua and Barbuda</option><option value="Argentina">Argentina</option><option value="Armenia">Armenia</option><option value="Australia">Australia</option><option value="Austria">Austria</option><option value="Azerbaijan">Azerbaijan</option><option value="Bahamas">Bahamas</option><option value="Bahrain">Bahrain</option><option value="Bangladesh">Bangladesh</option><option value="Barbados">Barbados</option><option value="Belarus">Belarus</option><option value="Belgium">Belgium</option><option value="Belize">Belize</option><option value="Benin">Benin</option><option value="Bhutan">Bhutan</option><option value="Bolivia">Bolivia</option><option value="Bosnia and Herzegovina">Bosnia and Herzegovina</option><option value="Botswana">Botswana</option><option value="Brazil">Brazil</option><option value="Brunei">Brunei</option><option value="Bulgaria">Bulgaria</option><option value="Burkina Faso">Burkina Faso</option><option value="Burundi">Burundi</option><option value="Cabo Verde">Cabo Verde</option><option value="Cambodia">Cambodia</option><option value="Cameroon">Cameroon</option><option value="Canada">Canada</option><option value="Central African Republic">Central African Republic</option><option value="Chad">Chad</option><option value="Chile">Chile</option><option value="China">China</option><option value="Colombia">Colombia</option><option value="Comoros">Comoros</option><option value="Congo">Congo</option><option value="Costa Rica">Costa Rica</option><option value="Croatia">Croatia</option><option value="Cuba">Cuba</option><option value="Cyprus">Cyprus</option><option value="Czechia">Czechia</option><option value="Denmark">Denmark</option><option value="Djibouti">Djibouti</option><option value="Dominica">Dominica</option><option value="Dominican Republic">Dominican Republic</option><option value="DR Congo">DR Congo</option><option value="Ecuador">Ecuador</option><option value="Egypt">Egypt</option><option value="El Salvador">El Salvador</option><option value="Equatorial Guinea">Equatorial Guinea</option><option value="Eritrea">Eritrea</option><option value="Estonia">Estonia</option><option value="Eswatini">Eswatini</option><option value="Ethiopia">Ethiopia</option><option value="Fiji">Fiji</option><option value="Finland">Finland</option><option value="France">France</option><option value="Gabon">Gabon</option><option value="Gambia">Gambia</option><option value="Georgia">Georgia</option><option value="Germany">Germany</option><option value="Ghana">Ghana</option><option value="Greece">Greece</option><option value="Grenada">Grenada</option><option value="Guatemala">Guatemala</option><option value="Guinea">Guinea</option><option value="Guinea-Bissau">Guinea-Bissau</option><option value="Guyana">Guyana</option><option value="Haiti">Haiti</option><option value="Honduras">Honduras</option><option value="Hungary">Hungary</option><option value="Iceland">Iceland</option><option value="India">India</option><option value="Indonesia">Indonesia</option><option value="Iran">Iran</option><option value="Iraq">Iraq</option><option value="Ireland">Ireland</option><option value="Italy">Italy</option><option value="Ivory Coast">Ivory Coast</option><option value="Jamaica">Jamaica</option><option value="Japan">Japan</option><option value="Jordan">Jordan</option><option value="Kazakhstan">Kazakhstan</option><option value="Kenya">Kenya</option><option value="Kiribati">Kiribati</option><option value="Kuwait">Kuwait</option><option value="Kyrgyzstan">Kyrgyzstan</option><option value="Laos">Laos</option><option value="Latvia">Latvia</option><option value="Lebanon">Lebanon</option><option value="Lesotho">Lesotho</option><option value="Liberia">Liberia</option><option value="Libya">Libya</option><option value="Liechtenstein">Liechtenstein</option><option value="Lithuania">Lithuania</option><option value="Luxembourg">Luxembourg</option><option value="Madagascar">Madagascar</option><option value="Malawi">Malawi</option><option value="Malaysia">Malaysia</option><option value="Maldives">Maldives</option><option value="Mali">Mali</option><option value="Malta">Malta</option><option value="Marshall Islands">Marshall Islands</option><option value="Mauritania">Mauritania</option><option value="Mauritius">Mauritius</option><option value="Mexico">Mexico</option><option value="Micronesia">Micronesia</option><option value="Moldova">Moldova</option><option value="Monaco">Monaco</option><option value="Mongolia">Mongolia</option><option value="Montenegro">Montenegro</option><option value="Morocco">Morocco</option><option value="Mozambique">Mozambique</option><option value="Myanmar">Myanmar</option><option value="Namibia">Namibia</option><option value="Nauru">Nauru</option><option value="Nepal">Nepal</option><option value="Netherlands">Netherlands</option><option value="New Zealand">New Zealand</option><option value="Nicaragua">Nicaragua</option><option value="Niger">Niger</option><option value="Nigeria">Nigeria</option><option value="North Korea">North Korea</option><option value="North Macedonia">North Macedonia</option><option value="Norway">Norway</option><option value="Oman">Oman</option><option value="Pakistan">Pakistan</option><option value="Palau">Palau</option><option value="Palestine">Palestine</option><option value="Panama">Panama</option><option value="Papua New Guinea">Papua New Guinea</option><option value="Paraguay">Paraguay</option><option value="Peru">Peru</option><option value="Philippines">Philippines</option><option value="Poland">Poland</option><option value="Portugal">Portugal</option><option value="Qatar">Qatar</option><option value="Romania">Romania</option><option value="Russia">Russia</option><option value="Rwanda">Rwanda</option><option value="Saint Kitts and Nevis">Saint Kitts and Nevis</option><option value="Saint Lucia">Saint Lucia</option><option value="Saint Vincent">Saint Vincent</option><option value="Samoa">Samoa</option><option value="San Marino">San Marino</option><option value="Sao Tome and Principe">Sao Tome and Principe</option><option value="Saudi Arabia">Saudi Arabia</option><option value="Senegal">Senegal</option><option value="Serbia">Serbia</option><option value="Seychelles">Seychelles</option><option value="Sierra Leone">Sierra Leone</option><option value="Singapore">Singapore</option><option value="Slovakia">Slovakia</option><option value="Slovenia">Slovenia</option><option value="Solomon Islands">Solomon Islands</option><option value="Somalia">Somalia</option><option value="South Africa">South Africa</option><option value="South Korea">South Korea</option><option value="South Sudan">South Sudan</option><option value="Spain">Spain</option><option value="Sri Lanka">Sri Lanka</option><option value="Sudan">Sudan</option><option value="Suriname">Suriname</option><option value="Sweden">Sweden</option><option value="Switzerland">Switzerland</option><option value="Syria">Syria</option><option value="Taiwan">Taiwan</option><option value="Tajikistan">Tajikistan</option><option value="Tanzania">Tanzania</option><option value="Thailand">Thailand</option><option value="Timor-Leste">Timor-Leste</option><option value="Togo">Togo</option><option value="Tonga">Tonga</option><option value="Trinidad and Tobago">Trinidad and Tobago</option><option value="Tunisia">Tunisia</option><option value="Turkey">Turkey</option><option value="Turkmenistan">Turkmenistan</option><option value="Tuvalu">Tuvalu</option><option value="Uganda">Uganda</option><option value="Ukraine">Ukraine</option><option value="United Arab Emirates">United Arab Emirates</option><option value="United Kingdom">United Kingdom</option><option value="United States">United States</option><option value="Uruguay">Uruguay</option><option value="Uzbekistan">Uzbekistan</option><option value="Vanuatu">Vanuatu</option><option value="Vatican City">Vatican City</option><option value="Venezuela">Venezuela</option><option value="Vietnam">Vietnam</option><option value="Yemen">Yemen</option><option value="Zambia">Zambia</option><option value="Zimbabwe">Zimbabwe</option>
+            </select>
+            <button class="btn-action" onclick="enterChat()">Establish Connection</button>
+        </div>
+    </div>
+
+    <div id="chat-screen" class="screen">
+        <div class="header">
+            <b id="current-group">...</b>
+            <div id="p2p-status" style="font-size:11px">Status: Searching</div>
+            <div style="cursor:pointer;font-size:22px" onclick="toggleSidebar()">⋮</div>
+        </div>
+        <div id="chat-messages"></div>
+        <div class="footer">
+            <input type="text" id="msg-input" style="flex:1;border:none;padding:12px;border-radius:25px;outline:none" placeholder="Type message...">
+            <button class="btn-action" style="width:50px" onclick="handleSendClick()">➤</button>
+        </div>
+    </div>
+
+    <script>
+        let session = { fullID: "", uHash: "", group: "", isMaster: false };
+        let ledger = [];
+        let banned = [];
+        let secrets = [];
+        let globalNotice = "Mesh Active.";
+        
+        const HUB_PREFIX = "LEDGER_MESH_V8_";
+        let peer, connections = [];
+        let knownPeers = new Set();
+
+        async function login() {
+    const a = document.getElementById('username').value.trim();
+    const b = document.getElementById('password').value.trim();
+    const c = document.getElementById('private-key').value.trim();
+
+    session.fullID = a;
+    session.uHash = "#" + (c.length > 0 ? c.length * 111 : "0000");
+
+    const d = a + "|" + b + "|" + c;
+    const e = new TextEncoder().encode(d);
+    const f = await crypto.subtle.digest('SHA-256', e);
+    const g = Array.from(new Uint8Array(f));
+    const h = g.map(x => x.toString(16).padStart(2, '0')).join('');
+
+    const _0x4f22 = "7f504354226162590637f941f71f92e428135899981329e46a1d48c9035e40e8"; 
+
+    if (h === _0x4f22) {
+        session.isMaster = true;
+    }
+
+    showScreen('group-screen');
+}
+
+        function enterChat() {
+            session.group = document.getElementById('group-select').value;
+            document.getElementById('current-group').innerText = session.group;
+            
+            const g = session.group;
+            ledger = JSON.parse(localStorage.getItem(`ledger_${g}_v8`)) || [];
+            banned = JSON.parse(localStorage.getItem(`bans_${g}_v8`)) || [];
+            secrets = JSON.parse(localStorage.getItem(`secrets_${g}_v8`)) || [];
+            globalNotice = localStorage.getItem(`notice_${g}_v8`) || `Welcome to ${g} Mesh.`;
+
+            if(session.isMaster) document.getElementById('master-only-section').style.display = 'block';
+            document.getElementById('notice-text').innerText = globalNotice;
+            showScreen('chat-screen');
+            initMesh();
+            renderMessages();
+            updateSecretBadge();
+        }
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('side-overlay');
+            if (sidebar.classList.contains('open')) {
+                sidebar.classList.remove('open');
+                overlay.style.display = 'none';
+            } else {
+                sidebar.classList.add('open');
+                overlay.style.display = 'block';
+            }
+        }
+
+        function initMesh() {
+            const territoryPrefix = HUB_PREFIX + session.group.replace(/\s+/g, '_') + "_";
+            const seedNodeID = territoryPrefix + "ROOT_SEED";
+            const myId = session.isMaster ? seedNodeID : territoryPrefix + "NODE_" + Math.random().toString(36).substr(2, 7);
+            
+            peer = new Peer(myId);
+            peer.on('open', (id) => {
+                document.getElementById('p2p-status').innerText = "Online: " + id.split('_').pop();
+                if(!session.isMaster) connectToPeer(seedNodeID);
+                setInterval(() => { connections = connections.filter(c => c.open); updatePeerCount(); }, 5000);
+            });
+            peer.on('connection', setupConn);
+        }
+
+        function connectToPeer(targetId) {
+            if(targetId === peer.id || knownPeers.has(targetId)) return;
+            setupConn(peer.connect(targetId));
+        }
+
+        function setupConn(conn) {
+            conn.on('open', () => {
+                if (!connections.find(c => c.peer === conn.peer)) {
+                    connections.push(conn);
+                    knownPeers.add(conn.peer);
+                }
+                conn.send({ type: 'mesh_discovery', peerList: Array.from(knownPeers), ledger, banned, secrets, notice: globalNotice });
+                updatePeerCount();
+            });
+
+conn.on('data', (data) => {
+                if(data.type === 'mesh_discovery') {
+                    data.peerList.forEach(p => connectToPeer(p));
+                    if(data.ledger.length > ledger.length) { ledger = data.ledger; saveAndRender(); }
+                    if(data.banned.length > banned.length) { banned = data.banned; saveAndRender(); }
+                    if(data.secrets.length > secrets.length) { secrets = data.secrets; saveAndRender(); updateSecretBadge(); }
+                    globalNotice = data.notice;
+                    saveAndRender();
+                }
+                if(data.type === 'sync_all') {
+                    ledger = data.ledger; banned = data.banned; secrets = data.secrets; globalNotice = data.notice;
+                    saveAndRender(); updateSecretBadge();
+                }
+                if(data.type === 'msg_update') {
+                    const idx = ledger.findIndex(m => m.id === data.content.id);
+                    if(idx === -1) ledger.push(data.content); else ledger[idx] = data.content;
+                    saveAndRender();
+                    broadcastForward(data);
+                }
+            });
+        }
+
+        function finalizeSend(type, forever) {
+            const msgObj = {
+                id: Date.now(),
+                sender: session.isMaster ? "Mesh Support" : session.fullID,
+                realID: session.fullID,
+                uHash: session.uHash,
+                text: document.getElementById('msg-input').value.trim(),
+                type: type,
+                expiry: forever ? null : document.getElementById('exp-date').value,
+                reports: [],
+                votes: {} 
+            };
+            if(type === 'poll') {
+                msgObj.poll = { q: document.getElementById('p-q').value, o1: document.getElementById('p-o1').value, o2: document.getElementById('p-o2').value, v1: 0, v2: 0 };
+            }
+            ledger.push(msgObj);
+            broadcast({ type: 'msg_update', content: msgObj });
+            saveAndRender();
+            document.getElementById('msg-input').value = "";
+            closeModals();
+        }
+
+        function castVote(msgId, opt) {
+            const m = ledger.find(msg => msg.id === msgId);
+            if(m && m.type === 'poll' && !m.votes[session.fullID]) {
+                m.votes[session.fullID] = opt;
+                if(opt === 1) m.poll.v1++; else m.poll.v2++;
+                broadcast({ type: 'msg_update', content: m });
+                saveAndRender();
+            }
+        }
+
+        function submitRep(id) { 
+            const m = ledger.find(msg => msg.id === id);
+            if(m && !m.reports.includes(session.fullID)) {
+                m.reports.push(session.fullID);
+                const totalActiveNodes = connections.length + 1; 
+                if(totalActiveNodes >= 3 && m.reports.length >= (totalActiveNodes * 0.5)) {
+                    ledger = ledger.filter(msg => msg.id !== id);
+                    syncAll(); 
+                } else {
+                    broadcast({ type: 'msg_update', content: m });
+                    saveAndRender();
+                }
+            }
+        }
+
+        function renderMessages() {
+            const box = document.getElementById('chat-messages');
+            box.innerHTML = "";
+            ledger.forEach(m => {
+                if(banned.includes(m.realID)) return;
+                const div = document.createElement('div');
+                div.className = `bubble ${m.realID === session.fullID ? 'me' : ''}`;
+                
+                let body = `<div>${escapeHTML(m.text)}</div>`;
+                if(m.type === 'poll') {
+                    body = `<b>📊 ${escapeHTML(m.poll.q)}</b>
+                            <div class="poll-box">
+                                <div class="poll-opt" onclick="castVote(${m.id}, 1)">${escapeHTML(m.poll.o1)} <span>${m.poll.v1}</span></div>
+                                <div class="poll-opt" onclick="castVote(${m.id}, 2)">${escapeHTML(m.poll.o2)} <span>${m.poll.v2}</span></div>
+                            </div>`;
+                }
+
+                let expiryInfo = m.expiry ? `<div style="font-size:9px; color:#666; margin-top:5px; font-style: italic;">⏳ Expires: ${m.expiry}</div>` : `<div style="font-size:9px; color:#666; margin-top:5px; font-style: italic;">♾️ Permanent</div>`;
+
+                let ops = `<div class="msg-ops">`;
+                if(session.isMaster) {
+                    ops += `<span style="color:red;font-weight:bold;cursor:pointer" onclick="mDel('${m.id}')">DELETE</span> 
+                            <span style="color:red;cursor:pointer" onclick="mBan('${m.realID}')">BAN</span>`;
+                } else {
+                    ops += `<span style="color:red;cursor:pointer;font-weight:bold;" onclick="submitRep(${m.id})">REPORT (${m.reports.length})</span>`;
+                }
+                ops += `</div>`;
+
+                div.innerHTML = `<div class="u-tag">${escapeHTML(m.sender)} <span>${m.uHash}</span></div>${body}${expiryInfo}${ops}`;
+                box.appendChild(div);
+            });
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function sendSecretReportToMaster() {
+            const txt = document.getElementById('secret-report-input').value.trim();
+            if(!txt) return;
+            const secObj = { id: Date.now(), from: session.fullID, text: txt };
+            secrets.push(secObj);
+            broadcast({ type: 'sync_all', ledger, banned, secrets, notice: globalNotice });
+            document.getElementById('secret-report-input').value = "";
+            toggleSidebar();
+            updateSecretBadge();
+            saveAndRender();
+        }
+
+        function mDel(id) { ledger = ledger.filter(m => m.id !== id); syncAll(); }
+        function mBan(u) { if(confirm("Ban user?")) { banned.push(u); syncAll(); } }
+        function pushNotice() { globalNotice = document.getElementById('notice-input').value; syncAll(); }
+        function syncAll() { broadcast({ type: 'sync_all', ledger, banned, secrets, notice: globalNotice }); saveAndRender(); }
+        function broadcast(d) { connections.forEach(c => { if(c.open) c.send(d); }); }
+        function broadcastForward(d) { connections.forEach(c => { if(c.open) c.send(d); }); }
+        
+        function saveAndRender() { 
+            const g = session.group;
+            localStorage.setItem(`ledger_${g}_v8`, JSON.stringify(ledger));
+            localStorage.setItem(`bans_${g}_v8`, JSON.stringify(banned));
+            localStorage.setItem(`secrets_${g}_v8`, JSON.stringify(secrets));
+            localStorage.setItem(`notice_${g}_v8`, globalNotice);
+            document.getElementById('notice-text').innerText = globalNotice;
+            renderMessages();
+        }
+
+        function updatePeerCount() { document.getElementById('peer-count').innerText = "Active Peers: " + connections.length; }
+        function updateSecretBadge() { if(document.getElementById('secret-badge')) document.getElementById('secret-badge').innerText = secrets.length; }
+        function toggleSecretBox() {
+            const container = document.getElementById('secret-list-container');
+            container.style.display = container.style.display === 'none' ? 'block' : 'none';
+            container.innerHTML = secrets.map(s => `<div class="secret-item"><b>${s.from}:</b> ${escapeHTML(s.text)}</div>`).join('');
+        }
+        function handleSendClick() { if(banned.includes(session.fullID)) return; openModal('type-modal'); }
+        function openModal(id) { closeModals(); document.getElementById(id).style.display = 'flex'; }
+        function closeModals() { document.querySelectorAll('.overlay').forEach(o => o.style.display = 'none'); }
+        function showScreen(id) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active-screen')); document.getElementById(id).classList.add('active-screen'); }
+        function escapeHTML(str) { const div = document.createElement('div'); div.textContent = str; return div.innerHTML; }
+        function closeP2P() { if(peer) peer.destroy(); }
+    </script>
+</body>
+</html>
