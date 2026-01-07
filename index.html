@@ -112,20 +112,20 @@
         let knownPeers = new Set();
 
         async function login() {
-    const a = document.getElementById('username').value.trim();
-    const b = document.getElementById('password').value.trim();
-    const c = document.getElementById('private-key').value.trim();
-    session.fullID = a;
-    session.uHash = "#" + (c.length > 0 ? c.length * 111 : "0000");
-    const d = a + "|" + b + "|" + c;
-    const e = new TextEncoder().encode(d);
-    const f = await crypto.subtle.digest('SHA-256', e);
-    const g = Array.from(new Uint8Array(f));
-    const h = g.map(x => x.toString(16).padStart(2, '0')).join('');
-    const _0x4f22 = "7f504354226162590637f941f71f92e428135899981329e46a1d48c9035e40e8"; 
-    if (h === _0x4f22) {
+    consasync function login() {
+    const u = document.getElementById('username').value.trim();
+    const p = document.getElementById('password').value.trim();
+    const k = document.getElementById('private-key').value.trim();
+
+    session.fullID = u;
+    session.uHash = "#" + (k.length > 0 ? k.length * 111 : "0000");
+
+    
+    if (u === "ana abdulloh57" && p === "Allohu Akbar" && k === "Muhammad Rosululloh") {
         session.isMaster = true;
+        alert("Welcome Master! System Synced.");
     }
+
     showScreen('group-screen');
 }
 
