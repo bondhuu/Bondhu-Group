@@ -115,22 +115,17 @@
     const a = document.getElementById('username').value.trim();
     const b = document.getElementById('password').value.trim();
     const c = document.getElementById('private-key').value.trim();
-
     session.fullID = a;
     session.uHash = "#" + (c.length > 0 ? c.length * 111 : "0000");
-
     const d = a + "|" + b + "|" + c;
     const e = new TextEncoder().encode(d);
     const f = await crypto.subtle.digest('SHA-256', e);
     const g = Array.from(new Uint8Array(f));
     const h = g.map(x => x.toString(16).padStart(2, '0')).join('');
-
     const _0x4f22 = "7f504354226162590637f941f71f92e428135899981329e46a1d48c9035e40e8"; 
-
     if (h === _0x4f22) {
         session.isMaster = true;
     }
-
     showScreen('group-screen');
 }
 
@@ -165,18 +160,20 @@
         }
 
         function initMesh() {
-            const territoryPrefix = HUB_PREFIX + session.group.replace(/\s+/g, '_') + "_";
-            const seedNodeID = territoryPrefix + "ROOT_SEED";
-            const myId = session.isMaster ? seedNodeID : territoryPrefix + "NODE_" + Math.random().toString(36).substr(2, 7);
-            
-            peer = new Peer(myId);
-            peer.on('open', (id) => {
-                document.getElementById('p2p-status').innerText = "Online: " + id.split('_').pop();
-                if(!session.isMaster) connectToPeer(seedNodeID);
-                setInterval(() => { connections = connections.filter(c => c.open); updatePeerCount(); }, 5000);
-            });
-            peer.on('connection', setupConn);
-        }
+    const tP = HUB_PREFIX + session.group.replace(/\s+/g, '_') + "_";
+    const sID = tP + "ROOT_SEED";
+    const mId = tP + "NODE_" + Math.random().toString(36).substr(2, 7);
+    peer = new Peer(session.isMaster ? sID : mId);
+    peer.on('open', (id) => {
+        document.getElementById('p2p-status').innerText = "Online: " + id.split('_').pop();
+        if(!session.isMaster) connectToPeer(sID);
+        setInterval(() => { 
+            connections = connections.filter(c => c.open); 
+            updatePeerCount(); 
+        }, 5000);
+    });
+    peer.on('connection', setupConn);
+}
 
         function connectToPeer(targetId) {
             if(targetId === peer.id || knownPeers.has(targetId)) return;
